@@ -1,5 +1,9 @@
 # pine-ai
 
+[![PyPI version](https://img.shields.io/pypi/v/pine-ai)](https://pypi.org/project/pine-ai/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pine-ai)](https://pypi.org/project/pine-ai/)
+[![license](https://img.shields.io/pypi/l/pine-ai)](./LICENSE)
+
 Pine AI SDK for Python. Let Pine AI handle your digital chores.
 
 ## Install
