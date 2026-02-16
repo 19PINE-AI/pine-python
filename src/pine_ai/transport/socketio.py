@@ -33,6 +33,7 @@ class SocketIOManager:
         self._sio: Optional[socketio.AsyncClient] = None
         self._connected = False
         self._event_handlers: list[Callable[[str, dict[str, Any]], None]] = []
+        self._joined_sessions: set[str] = set()
 
     @property
     def connected(self) -> bool:
@@ -73,7 +74,12 @@ class SocketIOManager:
         @self._sio.on("ready")
         async def on_ready(*_args: Any) -> None:
             self._connected = True
-            ready_event.set()
+            if not ready_event.is_set():
+                ready_event.set()
+            else:
+                # Reconnection: re-join all previously joined sessions
+                for sid in list(self._joined_sessions):
+                    self.emit("session:join", None, sid)
 
         @self._sio.on("*")
         async def on_any(event: str, data: Any) -> None:
@@ -114,6 +120,11 @@ class SocketIOManager:
         """
         if not self._sio or not self._sio.connected:
             raise RuntimeError("Socket.IO not connected")
+        # Track join/leave for reconnection
+        if event_type == "session:join" and session_id:
+            self._joined_sessions.add(session_id)
+        if event_type == "session:leave" and session_id:
+            self._joined_sessions.discard(session_id)
         from pine_ai.transport.envelope import build_envelope
         envelope = build_envelope(
             event_type, data,

@@ -61,5 +61,19 @@ class HttpClient:
             raise PineAIError("http_error", f"HTTP {resp.status_code}: {resp.text[:200]}")
         return self._unwrap(resp.json())
 
+    async def upload(self, path: str, file_path: str, authenticated: bool = True) -> Any:
+        """Upload a file via multipart form data."""
+        import os
+        filename = os.path.basename(file_path)
+        with open(file_path, "rb") as f:
+            files = {"files": (filename, f)}
+            headers = {}
+            if authenticated and self._token:
+                headers["Authorization"] = f"Bearer {self._token}"
+            resp = await self._client.post(path, files=files, headers=headers)
+        if resp.status_code >= 400:
+            raise PineAIError("http_error", f"HTTP {resp.status_code}: {resp.text[:200]}")
+        return self._unwrap(resp.json())
+
     async def close(self) -> None:
         await self._client.aclose()

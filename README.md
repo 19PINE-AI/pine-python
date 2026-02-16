@@ -36,6 +36,33 @@ pine sessions list                       # List sessions
 pine task start <session-id>             # Start task (Pro)
 ```
 
+## Handling Events
+
+Pine AI behaves like a human assistant. After you send a message, it sends
+acknowledgments, then work logs, then the real response (form, text, or task_ready).
+**Don't respond to acknowledgments** — only respond to forms, specific questions,
+and task lifecycle events, or you'll create an infinite loop.
+
+## Continuing Existing Sessions
+
+```python
+# List all sessions
+result = await client.sessions.list(limit=20)
+
+# Continue an existing session
+await client.join_session(existing_session_id)
+history = await client.get_history(existing_session_id)
+async for event in client.chat(existing_session_id, "What is the status?"):
+    ...
+```
+
+## Attachments
+
+```python
+# Upload a document for dispute tasks
+attachments = await client.sessions.upload_attachment("bill.pdf")
+```
+
 ## Stream Buffering
 
 Text streaming is buffered internally. You receive one merged text event,

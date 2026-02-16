@@ -8,24 +8,24 @@ Stream buffering:
 """
 
 import asyncio
-from typing import Any, AsyncGenerator, Optional
+import time
+from typing import Any, AsyncGenerator, Callable, Coroutine, Optional
 
 from pine_ai.models.events import C2SEvent, S2CEvent
 from pine_ai.transport.socketio import SocketIOManager
 
-# Immediate-dispatch event types (Tier 2)
-IMMEDIATE_EVENTS = {
-    S2CEvent.SESSION_STATE, S2CEvent.SESSION_INPUT_STATE, S2CEvent.SESSION_RICH_CONTENT,
-    S2CEvent.SESSION_FORM_TO_USER,
-    S2CEvent.SESSION_ASK_FOR_LOCATION, S2CEvent.SESSION_LOCATION_SELECTION,
-    S2CEvent.SESSION_REWARD, S2CEvent.SESSION_PAYMENT, S2CEvent.SESSION_TASK_READY,
+TERMINAL_STATES = {"task_finished", "task_cancelled", "task_stale"}
+DEFAULT_IDLE_TIMEOUT_S = 120.0
+
+# Events that are buffered/debounced — NOT dispatched immediately
+BUFFERED_EVENTS = {S2CEvent.SESSION_TEXT_PART, S2CEvent.SESSION_WORK_LOG_PART}
+
+# Substantive response events — track for waiting_input termination gating
+SUBSTANTIVE_EVENTS = {
+    S2CEvent.SESSION_TEXT, S2CEvent.SESSION_FORM_TO_USER,
+    S2CEvent.SESSION_ASK_FOR_LOCATION, S2CEvent.SESSION_TASK_READY,
     S2CEvent.SESSION_TASK_FINISHED, S2CEvent.SESSION_INTERACTIVE_AUTH_CONFIRMATION,
-    S2CEvent.SESSION_THREE_WAY_CALL, S2CEvent.SESSION_ERROR, S2CEvent.SESSION_THINKING,
-    S2CEvent.SESSION_WORK_LOG, S2CEvent.SESSION_UPDATE_TITLE, S2CEvent.SESSION_TEXT,
-    S2CEvent.SESSION_MESSAGE_STATUS, S2CEvent.SESSION_CARD, S2CEvent.SESSION_NEXT_TASKS,
-    S2CEvent.SESSION_CONTINUE_IN_NEW_TASK, S2CEvent.SESSION_SOCIAL_SHARING,
-    S2CEvent.SESSION_RETRY, S2CEvent.SESSION_DEBUG, S2CEvent.SESSION_ACTION_STATUS,
-    S2CEvent.SESSION_COMPUTER_USE_INTERVENTION,
+    S2CEvent.SESSION_THREE_WAY_CALL, S2CEvent.SESSION_REWARD,
 }
 
 
@@ -62,8 +62,15 @@ class TextPartBuffer:
 
 
 class ChatEngine:
-    def __init__(self, sio: SocketIOManager):
+    def __init__(
+        self,
+        sio: SocketIOManager,
+        check_session_state: Optional[Callable[[str], Coroutine[Any, Any, dict[str, Any]]]] = None,
+        idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
+    ):
         self._sio = sio
+        self._check_session_state = check_session_state
+        self._idle_timeout_s = idle_timeout_s
 
     async def join_session(self, session_id: str) -> dict[str, Any]:
         """Join a session room — spec 5.1.1.
@@ -80,7 +87,12 @@ class ChatEngine:
         self._sio.emit(C2SEvent.SESSION_LEAVE, None, session_id)
 
     async def chat(
-        self, session_id: str, content: str,
+        self,
+        session_id: str,
+        content: str,
+        *,
+        attachments: Optional[list[dict[str, Any]]] = None,
+        referenced_sessions: Optional[list[dict[str, str]]] = None,
     ) -> AsyncGenerator[ChatEvent, None]:
         """Send a message and yield events with stream buffering.
         Production handler reads payload.data as {content, attachments, ...}.
@@ -90,8 +102,8 @@ class ChatEngine:
             C2SEvent.SESSION_MESSAGE,
             {
                 "content": content,
-                "attachments": [],
-                "referenced_sessions": [],
+                "attachments": attachments or [],
+                "referenced_sessions": referenced_sessions or [],
                 "client_now_date": datetime.now().isoformat(),
             },
             session_id,
@@ -99,13 +111,42 @@ class ChatEngine:
         async for event in self._listen(session_id):
             yield event
 
+    def send_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        attachments: Optional[list[dict[str, Any]]] = None,
+        referenced_sessions: Optional[list[dict[str, str]]] = None,
+    ) -> None:
+        """Fire-and-forget message send (no event listening)."""
+        from datetime import datetime
+        self._sio.emit(
+            C2SEvent.SESSION_MESSAGE,
+            {
+                "content": content,
+                "attachments": attachments or [],
+                "referenced_sessions": referenced_sessions or [],
+                "client_now_date": datetime.now().isoformat(),
+            },
+            session_id,
+        )
+
     async def _listen(self, session_id: str) -> AsyncGenerator[ChatEvent, None]:
         """Listen for events with stream buffering."""
+        # Check session state before entering loop — don't hang on completed sessions
+        if self._check_session_state:
+            try:
+                session = await self._check_session_state(session_id)
+                if session.get("state") in TERMINAL_STATES:
+                    yield ChatEvent(type=S2CEvent.SESSION_STATE, session_id=session_id, data={"content": session["state"]})
+                    return
+            except Exception:
+                pass  # best effort
+
         text_buffer = TextPartBuffer()
         queue: asyncio.Queue[Optional[ChatEvent]] = asyncio.Queue()
         done = False
-        # Only terminate on waiting_input AFTER agent has sent substantive content.
-        # The initial waiting_input (default state) arrives before agent starts.
         received_agent_response = False
 
         # Work log debounce state
@@ -162,37 +203,41 @@ class ChatEngine:
                     wl_timers[step_id] = loop.call_later(3.0, flush_wl, step_id)
                 return
 
-            # Tier 2: immediate events
-            if event in IMMEDIATE_EVENTS:
-                nonlocal received_agent_response
-                queue.put_nowait(ChatEvent(
-                    type=event, session_id=session_id,
-                    message_id=message_id, data=data, metadata=metadata,
-                ))
-                # Track substantive agent responses
-                if event in (
-                    S2CEvent.SESSION_TEXT, S2CEvent.SESSION_FORM_TO_USER,
-                    S2CEvent.SESSION_ASK_FOR_LOCATION, S2CEvent.SESSION_TASK_READY,
-                    S2CEvent.SESSION_TASK_FINISHED, S2CEvent.SESSION_INTERACTIVE_AUTH_CONFIRMATION,
-                    S2CEvent.SESSION_THREE_WAY_CALL, S2CEvent.SESSION_REWARD,
-                ):
-                    received_agent_response = True
-                # Terminal conditions — only after agent has spoken
-                if event == S2CEvent.SESSION_INPUT_STATE and isinstance(data, dict):
-                    if data.get("content") == "waiting_input" and received_agent_response:
-                        done = True
-                        queue.put_nowait(None)
-                if event == S2CEvent.SESSION_STATE and isinstance(data, dict):
-                    state = data.get("content", "")
-                    if state in ("task_finished", "task_cancelled", "task_stale"):
-                        done = True
-                        queue.put_nowait(None)
+            # All other events: dispatch immediately (pass-through for agent)
+            nonlocal received_agent_response
+            queue.put_nowait(ChatEvent(
+                type=event, session_id=session_id,
+                message_id=message_id, data=data, metadata=metadata,
+            ))
+            if event in SUBSTANTIVE_EVENTS:
+                received_agent_response = True
+            if event == S2CEvent.SESSION_INPUT_STATE and isinstance(data, dict):
+                if data.get("content") == "waiting_input" and received_agent_response:
+                    done = True
+                    queue.put_nowait(None)
+            if event == S2CEvent.SESSION_STATE and isinstance(data, dict):
+                state = data.get("content", "")
+                if state in TERMINAL_STATES:
+                    done = True
+                    queue.put_nowait(None)
 
         remove_handler = self._sio.add_event_handler(handler)
 
         try:
             while not done:
-                evt = await queue.get()
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=self._idle_timeout_s)
+                except asyncio.TimeoutError:
+                    # Idle timeout — check session state via REST
+                    if self._check_session_state:
+                        try:
+                            session = await self._check_session_state(session_id)
+                            if session.get("state") in TERMINAL_STATES:
+                                yield ChatEvent(type=S2CEvent.SESSION_STATE, session_id=session_id, data={"content": session["state"]})
+                                break
+                        except Exception:
+                            pass
+                    continue
                 if evt is None:
                     break
                 yield evt

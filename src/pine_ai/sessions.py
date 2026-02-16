@@ -2,6 +2,8 @@
 Sessions REST API — spec section 4.3.
 """
 
+from __future__ import annotations
+
 from typing import Any, Optional
 
 from pine_ai.transport.http import HttpClient
@@ -48,3 +50,19 @@ class SessionsAPI:
             "scheduled_time": scheduled_time,
             "scheduled_call_reminder": enabled,
         })
+
+    async def social_share(
+        self, session_id: str, platform: str, shared_url: str,
+    ) -> dict[str, Any]:
+        """Social share — spec 4.3.11. Earn credits for sharing results."""
+        return await self._http.post(f"/v2/sessions/{session_id}/social-share", {
+            "metadata": {"platform": platform, "shared_url": shared_url},
+        })
+
+    async def upload_attachment(self, file_path: str) -> list[dict[str, Any]]:
+        """Upload attachment — spec 4.4.1. Multipart form upload."""
+        return await self._http.upload(f"/v2/attachments", file_path)
+
+    async def delete_attachment(self, attachment_id: str) -> None:
+        """Delete attachment — spec 4.4.2"""
+        await self._http.delete(f"/v2/attachments/{attachment_id}")

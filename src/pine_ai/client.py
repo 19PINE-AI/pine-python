@@ -78,7 +78,7 @@ class AsyncPineAI:
             transports=self._transports,
             ready_timeout=self._ready_timeout,
         )
-        self._chat = ChatEngine(self._sio)
+        self._chat = ChatEngine(self._sio, check_session_state=self.sessions.get)
         await self._sio.connect()
 
     async def disconnect(self) -> None:
@@ -115,11 +115,38 @@ class AsyncPineAI:
             session_id=session_id,
         )
 
-    async def chat(self, session_id: str, content: str) -> AsyncGenerator[ChatEvent, None]:
+    async def chat(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        attachments: Optional[list[dict[str, Any]]] = None,
+        referenced_sessions: Optional[list[dict[str, str]]] = None,
+    ) -> AsyncGenerator[ChatEvent, None]:
         """Send a message and yield buffered events."""
         self._ensure_connected()
-        async for event in self._chat.chat(session_id, content):  # type: ignore[union-attr]
+        async for event in self._chat.chat(  # type: ignore[union-attr]
+            session_id, content,
+            attachments=attachments,
+            referenced_sessions=referenced_sessions,
+        ):
             yield event
+
+    def send_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        attachments: Optional[list[dict[str, Any]]] = None,
+        referenced_sessions: Optional[list[dict[str, str]]] = None,
+    ) -> None:
+        """Send a message without waiting for events (fire-and-forget)."""
+        self._ensure_connected()
+        self._chat.send_message(  # type: ignore[union-attr]
+            session_id, content,
+            attachments=attachments,
+            referenced_sessions=referenced_sessions,
+        )
 
     async def listen(self, session_id: str) -> AsyncGenerator[ChatEvent, None]:
         """Listen for events on a joined session without sending a message."""
@@ -205,14 +232,40 @@ class PineAI:
     def get_history(self, session_id: str, **kwargs: Any) -> dict[str, Any]:
         return self._run(self._async.get_history(session_id, **kwargs))
 
-    def chat_sync(self, session_id: str, content: str) -> list[ChatEvent]:
+    def chat_sync(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        attachments: Optional[list[dict[str, Any]]] = None,
+        referenced_sessions: Optional[list[dict[str, str]]] = None,
+    ) -> list[ChatEvent]:
         """Send a message and return all events as a list (blocking)."""
         async def _collect() -> list[ChatEvent]:
             events = []
-            async for event in self._async.chat(session_id, content):
+            async for event in self._async.chat(
+                session_id, content,
+                attachments=attachments,
+                referenced_sessions=referenced_sessions,
+            ):
                 events.append(event)
             return events
         return self._run(_collect())
+
+    def send_message(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        attachments: Optional[list[dict[str, Any]]] = None,
+        referenced_sessions: Optional[list[dict[str, str]]] = None,
+    ) -> None:
+        """Send a message without waiting for events (fire-and-forget)."""
+        self._async.send_message(
+            session_id, content,
+            attachments=attachments,
+            referenced_sessions=referenced_sessions,
+        )
 
     def send_form_response(self, session_id: str, message_id: str, form_data: dict[str, Any]) -> None:
         self._async.send_form_response(session_id, message_id, form_data)
