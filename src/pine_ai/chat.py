@@ -86,6 +86,25 @@ class ChatEngine:
         """Leave a session room."""
         self._sio.emit(C2SEvent.SESSION_LEAVE, None, session_id)
 
+    @staticmethod
+    def _build_message_data(
+        content: str,
+        attachments: Optional[list[dict[str, Any]]] = None,
+        referenced_sessions: Optional[list[dict[str, str]]] = None,
+        action: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Build the session:message payload per spec 5.1.1."""
+        from datetime import datetime
+        data: dict[str, Any] = {
+            "content": content,
+            "attachments": attachments or [],
+            "referenced_sessions": referenced_sessions or [],
+            "client_now_date": datetime.now().isoformat(),
+        }
+        if action is not None:
+            data["action"] = action
+        return data
+
     async def chat(
         self,
         session_id: str,
@@ -93,19 +112,14 @@ class ChatEngine:
         *,
         attachments: Optional[list[dict[str, Any]]] = None,
         referenced_sessions: Optional[list[dict[str, str]]] = None,
+        action: Optional[dict[str, Any]] = None,
     ) -> AsyncGenerator[ChatEvent, None]:
         """Send a message and yield events with stream buffering.
         Production handler reads payload.data as {content, attachments, ...}.
         """
-        from datetime import datetime
         self._sio.emit(
             C2SEvent.SESSION_MESSAGE,
-            {
-                "content": content,
-                "attachments": attachments or [],
-                "referenced_sessions": referenced_sessions or [],
-                "client_now_date": datetime.now().isoformat(),
-            },
+            self._build_message_data(content, attachments, referenced_sessions, action),
             session_id,
         )
         async for event in self._listen(session_id):
@@ -118,17 +132,12 @@ class ChatEngine:
         *,
         attachments: Optional[list[dict[str, Any]]] = None,
         referenced_sessions: Optional[list[dict[str, str]]] = None,
+        action: Optional[dict[str, Any]] = None,
     ) -> None:
         """Fire-and-forget message send (no event listening)."""
-        from datetime import datetime
         self._sio.emit(
             C2SEvent.SESSION_MESSAGE,
-            {
-                "content": content,
-                "attachments": attachments or [],
-                "referenced_sessions": referenced_sessions or [],
-                "client_now_date": datetime.now().isoformat(),
-            },
+            self._build_message_data(content, attachments, referenced_sessions, action),
             session_id,
         )
 

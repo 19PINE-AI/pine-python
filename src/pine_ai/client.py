@@ -122,6 +122,7 @@ class AsyncPineAI:
         *,
         attachments: Optional[list[dict[str, Any]]] = None,
         referenced_sessions: Optional[list[dict[str, str]]] = None,
+        action: Optional[dict[str, Any]] = None,
     ) -> AsyncGenerator[ChatEvent, None]:
         """Send a message and yield buffered events."""
         self._ensure_connected()
@@ -129,6 +130,7 @@ class AsyncPineAI:
             session_id, content,
             attachments=attachments,
             referenced_sessions=referenced_sessions,
+            action=action,
         ):
             yield event
 
@@ -139,6 +141,7 @@ class AsyncPineAI:
         *,
         attachments: Optional[list[dict[str, Any]]] = None,
         referenced_sessions: Optional[list[dict[str, str]]] = None,
+        action: Optional[dict[str, Any]] = None,
     ) -> None:
         """Send a message without waiting for events (fire-and-forget)."""
         self._ensure_connected()
@@ -146,6 +149,7 @@ class AsyncPineAI:
             session_id, content,
             attachments=attachments,
             referenced_sessions=referenced_sessions,
+            action=action,
         )
 
     async def listen(self, session_id: str) -> AsyncGenerator[ChatEvent, None]:
@@ -239,6 +243,7 @@ class PineAI:
         *,
         attachments: Optional[list[dict[str, Any]]] = None,
         referenced_sessions: Optional[list[dict[str, str]]] = None,
+        action: Optional[dict[str, Any]] = None,
     ) -> list[ChatEvent]:
         """Send a message and return all events as a list (blocking)."""
         async def _collect() -> list[ChatEvent]:
@@ -247,6 +252,7 @@ class PineAI:
                 session_id, content,
                 attachments=attachments,
                 referenced_sessions=referenced_sessions,
+                action=action,
             ):
                 events.append(event)
             return events
@@ -259,12 +265,14 @@ class PineAI:
         *,
         attachments: Optional[list[dict[str, Any]]] = None,
         referenced_sessions: Optional[list[dict[str, str]]] = None,
+        action: Optional[dict[str, Any]] = None,
     ) -> None:
         """Send a message without waiting for events (fire-and-forget)."""
         self._async.send_message(
             session_id, content,
             attachments=attachments,
             referenced_sessions=referenced_sessions,
+            action=action,
         )
 
     def send_form_response(self, session_id: str, message_id: str, form_data: dict[str, Any]) -> None:
