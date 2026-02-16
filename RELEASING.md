@@ -8,7 +8,7 @@ This package uses **PyPI trusted publishing** (OIDC) — no PyPI tokens are stor
 
 1. Go to <https://pypi.org/manage/project/pine-ai/settings/publishing/> (or add a **pending publisher** at <https://pypi.org/manage/account/publishing/> if the project doesn't exist on PyPI yet).
 2. Under **Add a new publisher**, fill in:
-   - **Owner:** `RunVid`
+   - **Owner:** `pineai`
    - **Repository:** `pine-python`
    - **Workflow name:** `publish.yml`
 3. Save.
