@@ -31,7 +31,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cli = ["click>=8.1.0", "rich>=13.0.0"]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.23.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23.0", "ruff>=0.4.0"]
 
 [project.urls]
 Homepage = "https://github.com/pineai/pine-python"
@@ -46,3 +46,17 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 pine_assistant = ["py.typed"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pine_assistant"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
