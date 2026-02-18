@@ -24,8 +24,8 @@ class RewardData(BaseModel):
     fixed_charge_amount_min: Optional[float] = None
     fixed_charge_amount_tips: Optional[list[float]] = None
     status: Optional[str] = None
-    stripe_intent_id: Optional[str] = None
-    stripe_client_secret: Optional[str] = None
+    payment_intent_id: Optional[str] = None
+    payment_client_secret: Optional[str] = None
     coupon_id: Optional[str] = None
     coupon_amount: Optional[float] = None
     reject_status: Optional[str] = None
