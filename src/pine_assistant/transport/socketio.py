@@ -98,6 +98,7 @@ class SocketIOManager:
             auth={"token": self._token},
             transports=self._transports,
             socketio_path=SOCKETIO_PATH,
+            wait_timeout=self._ready_timeout,
         )
 
         try:
