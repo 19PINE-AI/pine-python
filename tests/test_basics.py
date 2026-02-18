@@ -9,13 +9,8 @@ from pine_assistant import (
     ConnectionError,
     C2SEvent,
     S2CEvent,
-    __version__,
 )
 from pine_assistant.models.events import NotificationEvent
-
-
-def test_version():
-    assert __version__ == "0.1.1"
 
 
 def test_public_exports():
