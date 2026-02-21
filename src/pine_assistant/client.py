@@ -158,6 +158,39 @@ class AsyncPineAI:
         async for event in self._chat._listen(session_id):  # type: ignore[union-attr]
             yield event
 
+    async def subscribe(self, session_id: str) -> AsyncGenerator[ChatEvent, None]:
+        """Persistent event stream for a session — yields events indefinitely.
+
+        Unlike listen(), this never terminates on terminal states or timeouts.
+        Designed for bidirectional REPL use where sending and receiving are
+        concurrent.
+        """
+        self._ensure_connected()
+        queue: asyncio.Queue[ChatEvent] = asyncio.Queue()
+
+        def _handler(event_type: str, raw: dict[str, Any]) -> None:
+            payload = raw.get("payload", {})
+            p_sid = payload.get("session_id")
+            if p_sid and p_sid != session_id:
+                return
+            queue.put_nowait(ChatEvent(
+                type=event_type,
+                session_id=session_id,
+                message_id=payload.get("message_id"),
+                data=payload.get("data"),
+                metadata=raw.get("metadata"),
+            ))
+
+        remove = self._sio.add_event_handler(_handler)  # type: ignore[union-attr]
+        try:
+            while self.connected:
+                try:
+                    yield await asyncio.wait_for(queue.get(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    continue
+        finally:
+            remove()
+
     async def create_and_chat(self, content: str) -> AsyncGenerator[ChatEvent, None]:
         """Convenience: create session, join, chat, return events."""
         session = await self.sessions.create()
